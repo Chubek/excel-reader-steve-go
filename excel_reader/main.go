@@ -106,14 +106,14 @@ func replaceAtIndex(input string, replacement string, index int) string {
 	return input[:index] + replacement + input[index+1:]
 }
 
-func parseTime(inputTime string) (x time.Time) {
+func parseTime(inputTime string) (x time.Time, y error) {
 	parsedTime, err := time.Parse(time.RFC3339, replaceAtIndex(inputTime, string(':')+string(inputTime[len(inputTime)-2]), len(inputTime)-2))
 
 	if err != nil {
 		fmt.Println("There was a problem parsing timee, it must be in the format of the original Excel file.")
 	}
 
-	return parsedTime
+	return parsedTime, err
 }
 
 func multiplyDuration(duration, factor float64) (x float64) {
@@ -140,8 +140,16 @@ func createValsAndSaveExcelFile(activitesMapLoaded map[string][][]string, activi
 		total := 0.0
 		totalIndex := 0
 		for i, val := range value {
-			timeParsed := parseTime(val[0])
-			floatVal, _ := strconv.ParseFloat(val[2], 64)
+			timeParsed, errTime := parseTime(val[0])
+			if errTime != nil {
+				fmt.Println("Error parsing time, continuing...")
+				continue
+			}
+			floatVal, errFloat := strconv.ParseFloat(val[2], 64)
+			if errFloat != nil {
+				fmt.Println("Error parsing value, continuing...")
+				continue
+			}
 			timeMultiplied := multiplyDuration(floatVal, factor)
 			timeAdded := addTime(timeParsed, timeMultiplied)
 
