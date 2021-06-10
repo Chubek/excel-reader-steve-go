@@ -1,8 +1,10 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"math"
+	"regexp"
 	"strconv"
 	"time"
 
@@ -121,7 +123,7 @@ func multiplyDuration(duration, factor float64) (x float64) {
 }
 
 func addTime(timeParsed time.Time, minutes float64) (x time.Time) {
-	return timeParsed.Add(time.Duration(timeParsed.Minute()) * time.Duration(int(math.Round((minutes)))))
+	return timeParsed.Add(time.Duration(timeParsed.Hour()) + time.Duration(timeParsed.Minute())*time.Duration(int(math.Round((minutes)))))
 }
 
 func returnLabels(index int) (x []string) {
@@ -137,23 +139,36 @@ func createValsAndSaveExcelFile(activitesMapLoaded map[string][][]string, activi
 		sheetName := fmt.Sprintf("%s_LOADED", key)
 		index := f.NewSheet(sheetName)
 		f.SetActiveSheet(index)
+		f.SetCellValue(sheetName, "A1", "Time")
+		f.SetCellValue(sheetName, "B1", "Minutes")
+		f.SetCellValue(sheetName, "C1", "Time Completed")
 		total := 0.0
-		totalIndex := 0
+		totalIndex := 3
 		for i, val := range value {
+			if timeMatch, _ := regexp.MatchString(`\d+-\d+-\d+T\d+:\d+:\d+-\d+`, val[0]); timeMatch == false {
+				fmt.Println("Time didn't match regex, continuing...")
+				continue
+			}
+
+			if floatMatch, _ := regexp.MatchString(`0.\d+`, val[5]); floatMatch == false {
+				fmt.Println("Float didn't match regex, continuing...")
+				continue
+			}
+
 			timeParsed, errTime := parseTime(val[0])
 			if errTime != nil {
 				fmt.Println("Error parsing time, continuing...")
 				continue
 			}
-			floatVal, errFloat := strconv.ParseFloat(val[2], 64)
+			floatVal, errFloat := strconv.ParseFloat(val[5], 64)
 			if errFloat != nil {
-				fmt.Println("Error parsing value, continuing...")
+				fmt.Println("Error parsing float, continuing...")
 				continue
 			}
 			timeMultiplied := multiplyDuration(floatVal, factor)
 			timeAdded := addTime(timeParsed, timeMultiplied)
 
-			labels := returnLabels(i)
+			labels := returnLabels(i + 2)
 			values := []string{timeParsed.String(), fmt.Sprintf("%f", timeMultiplied), timeAdded.String()}
 
 			zipped, _ := zip(labels, values)
@@ -164,31 +179,89 @@ func createValsAndSaveExcelFile(activitesMapLoaded map[string][][]string, activi
 
 			total += timeMultiplied
 			totalIndex += i
-
 		}
-
+		f.SetCellValue(sheetName, fmt.Sprintf("C%d", totalIndex), "Total")
 		f.SetCellValue(sheetName, fmt.Sprintf("D%d", totalIndex), fmt.Sprintf("%f", total))
+	}
 
+	for key, value := range activitesMapUnLoaded {
+		sheetName := fmt.Sprintf("%s_UNLOADED", key)
+		index := f.NewSheet(sheetName)
+		f.SetActiveSheet(index)
+		f.SetCellValue(sheetName, "A1", "Time")
+		f.SetCellValue(sheetName, "B1", "Minutes")
+		f.SetCellValue(sheetName, "C1", "Time Completed")
+		total := 0.0
+		totalIndex := 3
+		for i, val := range value {
+			if timeMatch, _ := regexp.MatchString(`\d+-\d+-\d+T\d+:\d+:\d+-\d+`, val[0]); timeMatch == false {
+				fmt.Println("Time didn't match regex, continuing...")
+				continue
+			}
+
+			if floatMatch, _ := regexp.MatchString(`0.\d+`, val[5]); floatMatch == false {
+				fmt.Println("Float didn't match regex, continuing...")
+				continue
+			}
+
+			timeParsed, errTime := parseTime(val[0])
+			if errTime != nil {
+				fmt.Println("Error parsing time, continuing...")
+				continue
+			}
+			floatVal, errFloat := strconv.ParseFloat(val[5], 64)
+			if errFloat != nil {
+				fmt.Println("Error parsing float, continuing...")
+				continue
+			}
+			timeMultiplied := multiplyDuration(floatVal, factor)
+			timeAdded := addTime(timeParsed, timeMultiplied)
+
+			labels := returnLabels(i + 2)
+			values := []string{timeParsed.String(), fmt.Sprintf("%f", timeMultiplied), timeAdded.String()}
+
+			zipped, _ := zip(labels, values)
+
+			for _, v := range zipped {
+				f.SetCellValue(sheetName, v.a, v.b)
+			}
+
+			total += timeMultiplied
+			totalIndex += i
+		}
+		f.SetCellValue(sheetName, fmt.Sprintf("C%d", totalIndex), "Total")
+		f.SetCellValue(sheetName, fmt.Sprintf("D%d", totalIndex), fmt.Sprintf("%f", total))
+	}
+
+	if err := f.SaveAs(fileloc); err != nil {
+		fmt.Println(err)
 	}
 
 }
 
+func operateMain(locCity, citySheet, locShift, shiftSheet, locFinal string, factor float64) {
+	loadedLoc, unloadedLoc := getCities(locCity, citySheet)
+	activities := getActivites(locShift, shiftSheet)
+	filteredLoc := filterActivites(activities, loadedLoc)
+	filteredUnLoc := filterActivites(activities, unloadedLoc)
+
+	createValsAndSaveExcelFile(filteredLoc, filteredUnLoc, locFinal, factor)
+
+}
+
 func main() {
-	citiesLoaded, citiesUnloaded := getCities("files/City_of_Kelowna.xlsx", "GLELAN-COMCOM")
-	activites := getActivites("files/Shift_Detail_Report_2021-06-021.xlsx", "Data")
-	filteredActivitesLoaded := filterActivites(activites, citiesLoaded)
-	filteredActivitesUnloaded := filterActivites(activites, citiesUnloaded)
+	locCityPtr := flag.String("locCity", "files/City_of_Kelowna.xlsx", "Location of city Excel file")
+	citySheetPtr := flag.String("citySheet", "GLELAN-COMCOM", "Sheet of city Excel file")
 
-	for key, value := range filteredActivitesLoaded {
-		for _, val := range value {
-			fmt.Println(key, "\t", val)
-		}
-	}
+	shiftPtr := flag.String("locShift", "files/Shift_Detail_Report_2021-06-021.xlsx", "Location of shift Excel file")
+	shiftSheetPtr := flag.String("shiftSheet", "Data", "Sheet of shift Excel file")
 
-	for key, value := range filteredActivitesUnloaded {
-		for _, val := range value {
-			fmt.Println(key, "\t", val)
-		}
-	}
+	finalFilePtr := flag.String("locFinal", "files/output/finalFile.xlsx", "Sheet of final file")
+
+	factorPtr := flag.Float64("factor", 600.0, "Factor for time multiplication")
+
+	flag.Parse()
+
+	operateMain(*locCityPtr, *citySheetPtr, *shiftPtr, *shiftSheetPtr, *finalFilePtr, *factorPtr)
 
 }
